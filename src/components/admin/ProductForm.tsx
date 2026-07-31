@@ -1,0 +1,639 @@
+"use client";
+
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { productSchema, ProductFormData } from "@/lib/validation/product";
+import { CategorySerialized } from "@/types/category";
+import { createCategory } from "@/lib/firebase/services/categories";
+import { generateSlug } from "@/lib/utils";
+import { Save, ArrowLeft, Sparkles, RefreshCw, Link as LinkIcon, CheckCircle2, Plus } from "lucide-react";
+import Link from "next/link";
+
+interface ProductFormProps {
+  initialData?: Partial<ProductFormData>;
+  categories: CategorySerialized[];
+  onSubmit: (data: ProductFormData) => Promise<void>;
+  isSubmitting?: boolean;
+}
+
+export function ProductForm({
+  initialData,
+  categories,
+  onSubmit,
+  isSubmitting = false,
+}: ProductFormProps) {
+  const [categoriesList, setCategoriesList] = useState<CategorySerialized[]>(categories);
+  const [isCreatingCat, setIsCreatingCat] = useState(false);
+  const [showCatModal, setShowCatModal] = useState(false);
+  const [newCatInput, setNewCatInput] = useState("");
+  const [statusBanner, setStatusBanner] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+
+  const [extractUrl, setExtractUrl] = useState("");
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractSuccess, setExtractSuccess] = useState(false);
+
+  const [imagesInput, setImagesInput] = useState<string>(
+    initialData?.images ? initialData.images.join("\n") : ""
+  );
+  const [tagsInput, setTagsInput] = useState<string>(
+    initialData?.tags ? initialData.tags.join(", ") : ""
+  );
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    formState: { errors },
+  } = useForm<ProductFormData>({
+    resolver: zodResolver(productSchema),
+    defaultValues: {
+      name: initialData?.name || "",
+      slug: initialData?.slug || "",
+      shortDescription: initialData?.shortDescription || "",
+      description: initialData?.description || "",
+      images: initialData?.images || [],
+      price: initialData?.price || 0,
+      originalPrice: initialData?.originalPrice || undefined,
+      discountPercent: initialData?.discountPercent || undefined,
+      rating: initialData?.rating || 5,
+      categoryId: initialData?.categoryId || (categories[0]?.id || ""),
+      tags: initialData?.tags || [],
+      platform: "shopee",
+      affiliateLinkId: initialData?.affiliateLinkId || "",
+      affiliateUrl: initialData?.affiliateUrl || "",
+      status: initialData?.status || "draft",
+      featured: initialData?.featured || false,
+      seoTitle: initialData?.seoTitle || "",
+      seoDescription: initialData?.seoDescription || "",
+    },
+  });
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const name = e.target.value;
+    setValue("name", name);
+    if (!initialData?.slug) {
+      setValue("slug", generateSlug(name));
+    }
+  };
+
+  const handleAutoExtract = async () => {
+    if (!extractUrl.trim()) {
+      setStatusBanner({
+        type: "warning",
+        message: "กรุณาวางลิงก์ Shopee หรือ Affiliate Link ก่อนกดดึงข้อมูลครับ",
+      });
+      return;
+    }
+
+    setIsExtracting(true);
+    setExtractSuccess(false);
+
+    try {
+      const res = await fetch("/api/admin/extract-shopee", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: extractUrl.trim() }),
+      });
+
+      const result = await res.json();
+      if (!res.ok || !result.data) {
+        throw new Error(result.error || "ไม่สามารถดึงข้อมูลจากลิงก์นี้ได้");
+      }
+
+      const d = result.data;
+      setValue("name", d.name);
+      setValue("slug", d.slug);
+      setValue("price", d.price);
+
+      const computedOrigPrice = d.originalPrice && d.originalPrice > d.price ? d.originalPrice : (d.price > 0 ? d.price + 5 : 0);
+      setValue("originalPrice", computedOrigPrice);
+      if (computedOrigPrice && d.price > 0 && computedOrigPrice > d.price) {
+        setValue("discountPercent", Math.round(((computedOrigPrice - d.price) / computedOrigPrice) * 100));
+      }
+
+      setValue("shortDescription", d.shortDescription);
+      setValue("description", d.description);
+      setValue("affiliateUrl", extractUrl.trim());
+
+      if (d.images && d.images.length > 0) {
+        setImagesInput(d.images.join("\n"));
+        setValue("images", d.images);
+      }
+
+      if (d.seo) {
+        if (d.seo.title) setValue("seoTitle", d.seo.title.slice(0, 70));
+        if (d.seo.description) setValue("seoDescription", d.seo.description.slice(0, 160));
+        if (d.seo.keywords) setTagsInput(d.seo.keywords.join(", "));
+      }
+
+      let createdCategoryName = "";
+      // Auto-match or Auto-create Category
+      if (d.suggestedCategory) {
+        const targetName = d.suggestedCategory.name;
+        const targetSlug = d.suggestedCategory.slug;
+
+        const existing = categoriesList.find(
+          (c) =>
+            c.name.toLowerCase().includes(targetName.toLowerCase()) ||
+            targetName.toLowerCase().includes(c.name.toLowerCase()) ||
+            c.slug === targetSlug
+        );
+
+        if (existing) {
+          setValue("categoryId", existing.id);
+          createdCategoryName = existing.name;
+        } else {
+          // Auto-create category in Firestore directly without prompting
+          try {
+            const cleanName = targetName.trim();
+            const slug = targetSlug || generateSlug(cleanName) || `cat-${Date.now()}`;
+
+            const newId = await createCategory({
+              name: cleanName,
+              slug,
+              description: `หมวดหมู่สินค้า ${cleanName}`,
+              sortOrder: categoriesList.length + 1,
+              status: "active",
+            });
+
+            const newCatItem: CategorySerialized = {
+              id: newId,
+              name: cleanName,
+              slug,
+              description: `หมวดหมู่สินค้า ${cleanName}`,
+              sortOrder: categoriesList.length + 1,
+              status: "active",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+
+            setCategoriesList((prev) => [...prev, newCatItem]);
+            setValue("categoryId", newId);
+            createdCategoryName = cleanName;
+          } catch (cErr) {
+            console.error("Error auto creating category:", cErr);
+          }
+        }
+      }
+
+      setExtractSuccess(true);
+      const catMsg = createdCategoryName ? ` หมวดหมู่: "${createdCategoryName}"` : "";
+      if (!d.price || d.price === 0) {
+        setStatusBanner({
+          type: "warning",
+          message: `✨ ดึงชื่อสินค้า, ลิงก์, รูปภาพ, SEO และจัด${catMsg} ให้อัตโนมัติแล้ว! (Shopee บล็อกตัวเลขราคา กรุณาใส่ราคาขายในช่องด้านล่าง)`,
+        });
+      } else {
+        setStatusBanner({
+          type: "success",
+          message: `✨ ดึงข้อมูลสินค้าครบถ้วน และจัด${catMsg} ให้อัตโนมัติเรียบร้อยแล้ว!`,
+        });
+      }
+    } catch (err: unknown) {
+      console.error("Auto extract error:", err);
+      const msg = err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการดึงข้อมูล";
+      setStatusBanner({
+        type: "error",
+        message: `ไม่สามารถดึงข้อมูลได้: ${msg}`,
+      });
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleQuickCreateCategory = async (nameToCreate: string) => {
+    if (!nameToCreate || !nameToCreate.trim()) return null;
+
+    setIsCreatingCat(true);
+    try {
+      const cleanName = nameToCreate.trim();
+      const slug = generateSlug(cleanName) || `cat-${Date.now()}`;
+
+      const newId = await createCategory({
+        name: cleanName,
+        slug,
+        description: `หมวดหมู่สินค้า ${cleanName}`,
+        sortOrder: categoriesList.length + 1,
+        status: "active",
+      });
+
+      const newCatItem: CategorySerialized = {
+        id: newId,
+        name: cleanName,
+        slug,
+        description: `หมวดหมู่สินค้า ${cleanName}`,
+        sortOrder: categoriesList.length + 1,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setCategoriesList((prev) => [...prev, newCatItem]);
+      setValue("categoryId", newId);
+      setShowCatModal(false);
+      setNewCatInput("");
+      setStatusBanner({
+        type: "success",
+        message: `เพิ่มหมวดหมู่ "${cleanName}" เรียบร้อยแล้ว`,
+      });
+      return newId;
+    } catch (err) {
+      console.error("Error creating category:", err);
+      setStatusBanner({
+        type: "error",
+        message: "เกิดข้อผิดพลาด ไม่สามารถสร้างหมวดหมู่ได้",
+      });
+      return null;
+    } finally {
+      setIsCreatingCat(false);
+    }
+  };
+
+  const handleFormSubmit = async (data: ProductFormData) => {
+    const images = imagesInput
+      .split("\n")
+      .map((url) => url.trim())
+      .filter((url) => url.length > 0);
+
+    const tags = tagsInput
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+
+    await onSubmit({
+      ...data,
+      images,
+      tags,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6 max-w-4xl relative">
+      <div className="flex items-center justify-between">
+        <Link
+          href="/admin/products"
+          className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>ย้อนกลับ</span>
+        </Link>
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white font-bold text-xs rounded-lg shadow-xs transition-colors flex items-center gap-1.5"
+        >
+          <Save className="w-4 h-4" />
+          <span>{isSubmitting ? "กำลังบันทึก..." : "บันทึกสินค้า"}</span>
+        </button>
+      </div>
+
+      {/* STATUS BANNER NOTIFICATION */}
+      {statusBanner && (
+        <div
+          className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-xs font-semibold shadow-xs animate-in fade-in slide-in-from-top-2 ${
+            statusBanner.type === "success"
+              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+              : statusBanner.type === "warning"
+              ? "bg-amber-50 text-amber-900 border-amber-200"
+              : "bg-red-50 text-red-800 border-red-200"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span>{statusBanner.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusBanner(null)}
+            className="text-gray-400 hover:text-gray-700 font-bold text-sm px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* QUICK CATEGORY CREATION MODAL */}
+      {showCatModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <h3 className="text-sm font-bold text-gray-900">เพิ่มหมวดหมู่ใหม่แบบด่วน</h3>
+            <input
+              type="text"
+              placeholder="ระบุชื่อหมวดหมู่ เช่น แคมป์ปิ้ง"
+              value={newCatInput}
+              onChange={(e) => setNewCatInput(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCatModal(false);
+                  setNewCatInput("");
+                }}
+                className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickCreateCategory(newCatInput)}
+                disabled={isCreatingCat || !newCatInput.trim()}
+                className="px-4 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white font-semibold text-xs rounded-lg"
+              >
+                {isCreatingCat ? "กำลังสร้าง..." : "ตกลง"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AUTO EXTRACTOR CARD */}
+      <div className="bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 rounded-2xl p-5 text-white shadow-md space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 font-bold text-sm sm:text-base">
+            <Sparkles className="w-5 h-5 text-amber-200" />
+            <span>⚡ ระบบดึงข้อมูลสินค้า & SEO อัตโนมัติ (Auto-Sync Extractor)</span>
+          </div>
+          {extractSuccess && (
+            <span className="bg-emerald-500/90 text-white text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>ดึงข้อมูลสำเร็จ!</span>
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs text-orange-100">
+          แค่วาง **Shopee Affiliate Link** ระบบจะดึง **ชื่อสินค้า, ราคา, รูปภาพ, รายละเอียด และตั้งค่า SEO Metadata** ให้อัตโนมัติในคลิกเดียว!
+        </p>
+
+        <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+          <div className="relative flex-1 w-full">
+            <input
+              type="text"
+              value={extractUrl}
+              onChange={(e) => setExtractUrl(e.target.value)}
+              placeholder="วางลิงก์ Shopee เช่น https://s.shopee.co.th/xxx หรือ https://shopee.co.th/..."
+              className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-white/95 text-gray-900 placeholder:text-gray-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-300 shadow-inner font-mono"
+            />
+            <LinkIcon className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAutoExtract}
+            disabled={isExtracting}
+            className="w-full sm:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 disabled:bg-amber-200 text-gray-950 font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 flex-shrink-0"
+          >
+            {isExtracting ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>กำลังดึงข้อมูล...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4 text-orange-950" />
+                <span>ดึงข้อมูลอัตโนมัติ</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 shadow-2xs">
+        <h2 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-2">
+          ข้อมูลพื้นฐาน
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              ชื่อสินค้า *
+            </label>
+            <input
+              type="text"
+              {...register("name")}
+              onChange={handleNameChange}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+            />
+            {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name.message}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              Slug (URL) *
+            </label>
+            <input
+              type="text"
+              {...register("slug")}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+            />
+            {errors.slug && <p className="text-xs text-red-600 mt-1">{errors.slug.message}</p>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              ราคาขาย (บาท) *
+            </label>
+            <input
+              type="number"
+              step="any"
+              {...register("price", {
+                valueAsNumber: true,
+                onChange: (e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    const orig = val + 5;
+                    setValue("originalPrice", orig);
+                    setValue("discountPercent", Math.round((5 / orig) * 100));
+                  }
+                },
+              })}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none font-semibold text-orange-600"
+            />
+            {errors.price && <p className="text-xs text-red-600 mt-1">{errors.price.message}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              ราคาเดิม (บาท)
+            </label>
+            <input
+              type="number"
+              step="any"
+              {...register("originalPrice", { valueAsNumber: true })}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              คะแนนรีวิว (0 - 5)
+            </label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="5"
+              {...register("rating", { valueAsNumber: true })}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-gray-700">
+                หมวดหมู่ *
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowCatModal(true)}
+                disabled={isCreatingCat}
+                className="text-[11px] text-orange-600 hover:text-orange-700 font-semibold flex items-center gap-0.5 hover:underline"
+              >
+                <Plus className="w-3 h-3" />
+                <span>{isCreatingCat ? "กำลังสร้าง..." : "สร้างหมวดใหม่"}</span>
+              </button>
+            </div>
+            <select
+              {...register("categoryId")}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none bg-white font-medium"
+            >
+              <option value="">-- เลือกหมวดหมู่ --</option>
+              {categoriesList.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            {errors.categoryId && <p className="text-xs text-red-600 mt-1">{errors.categoryId.message}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">
+              สถานะสินค้า
+            </label>
+            <select
+              {...register("status")}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none bg-white"
+            >
+              <option value="draft">ฉบับร่าง (Draft)</option>
+              <option value="published">เผยแพร่ (Published)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            ลิงก์ Shopee Affiliate (URL)
+          </label>
+          <input
+            type="text"
+            {...register("affiliateUrl")}
+            placeholder="https://s.shopee.co.th/xxx"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none font-mono text-xs text-blue-600"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            รายละเอียดสั้น *
+          </label>
+          <textarea
+            rows={2}
+            {...register("shortDescription")}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          />
+          {errors.shortDescription && <p className="text-xs text-red-600 mt-1">{errors.shortDescription.message}</p>}
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            รายละเอียดสินค้าเต็ม *
+          </label>
+          <textarea
+            rows={6}
+            {...register("description")}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          />
+          {errors.description && <p className="text-xs text-red-600 mt-1">{errors.description.message}</p>}
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            URL รูปภาพสินค้า (บรรทัดละ 1 URL)
+          </label>
+          <textarea
+            rows={3}
+            value={imagesInput}
+            onChange={(e) => setImagesInput(e.target.value)}
+            placeholder="https://down-aka-th.img.susercontent.com/..."
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none font-mono text-xs"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            แท็ก / คำค้นหา (แยกด้วยเครื่องหมายจุลภาค ,)
+          </label>
+          <input
+            type="text"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="มือถือ, แก็ดเจ็ต, ส่วนลด Shopee"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 pt-2">
+          <input
+            type="checkbox"
+            id="featured"
+            {...register("featured")}
+            className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
+          />
+          <label htmlFor="featured" className="text-xs font-semibold text-gray-800">
+            แสดงเป็นสินค้าแนะนำพิเศษ (Featured Product)
+          </label>
+        </div>
+      </div>
+
+      {/* SEO Section */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 shadow-2xs">
+        <h2 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-2">
+          ตั้งค่า SEO Metadata (สร้างให้อัตโนมัติ)
+        </h2>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            SEO Title (ไม่เกิน 70 ตัวอักษร)
+          </label>
+          <input
+            type="text"
+            {...register("seoTitle")}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            SEO Description (ไม่เกิน 160 ตัวอักษร)
+          </label>
+          <textarea
+            rows={2}
+            {...register("seoDescription")}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
+          />
+        </div>
+      </div>
+    </form>
+  );
+}
