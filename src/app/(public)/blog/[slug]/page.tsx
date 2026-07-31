@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Image from "next/image";
-import { getPostBySlug } from "@/lib/firebase/services/posts";
+import { getPostBySlug, getPosts } from "@/lib/firebase/services/posts";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { AffiliateDisclosure } from "@/components/affiliate/AffiliateDisclosure";
 import { SeoJsonLd } from "@/components/seo/SeoJsonLd";
@@ -12,6 +12,18 @@ import { siteConfig } from "@/config/site";
 import type { Metadata } from "next";
 
 export const revalidate = 3600;
+
+export async function generateStaticParams() {
+  try {
+    const posts = await getPosts({ limitCount: 100 });
+    if (posts.length > 0) {
+      return posts.map((p) => ({ slug: p.slug }));
+    }
+  } catch (err) {
+    console.error("Error generating blog static params:", err);
+  }
+  return [{ slug: "sample-post" }];
+}
 
 interface BlogPostPageProps {
   params: Promise<{ slug: string }>;

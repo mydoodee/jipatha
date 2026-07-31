@@ -15,6 +15,18 @@ import type { Metadata } from "next";
 
 export const revalidate = 3600;
 
+export async function generateStaticParams() {
+  try {
+    const products = await getProducts({ limitCount: 100 });
+    if (products.length > 0) {
+      return products.map((p) => ({ slug: p.slug }));
+    }
+  } catch (err) {
+    console.error("Error generating product static params:", err);
+  }
+  return [{ slug: "sample-product" }];
+}
+
 interface ProductDetailPageProps {
   params: Promise<{ slug: string }>;
 }

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getCategoryBySlug } from "@/lib/firebase/services/categories";
+import { getCategoryBySlug, getCategories } from "@/lib/firebase/services/categories";
 import { getProducts } from "@/lib/firebase/services/products";
 import { ProductGrid } from "@/components/product/ProductGrid";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
@@ -7,6 +7,18 @@ import { constructMetadata } from "@/lib/seo/metadata";
 import type { Metadata } from "next";
 
 export const revalidate = 3600;
+
+export async function generateStaticParams() {
+  try {
+    const categories = await getCategories("active");
+    if (categories.length > 0) {
+      return categories.map((c) => ({ slug: c.slug }));
+    }
+  } catch (err) {
+    console.error("Error generating category static params:", err);
+  }
+  return [{ slug: "general-products" }];
+}
 
 interface CategoryDetailPageProps {
   params: Promise<{ slug: string }>;

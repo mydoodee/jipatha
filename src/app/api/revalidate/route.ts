@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
+export const dynamic = "force-static";
+
 export async function POST(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

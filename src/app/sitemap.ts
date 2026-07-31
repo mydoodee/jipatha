@@ -4,6 +4,7 @@ import { getProducts } from "@/lib/firebase/services/products";
 import { getCategories } from "@/lib/firebase/services/categories";
 import { getPosts } from "@/lib/firebase/services/posts";
 
+export const dynamic = "force-static";
 export const revalidate = 3600;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

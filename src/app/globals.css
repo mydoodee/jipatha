@@ -3,11 +3,11 @@
 :root {
   --primary: #EE4D2D;
   --primary-dark: #D73211;
-  --background: #F5F5F5;
+  --background: #FAFAFA;
   --surface: #FFFFFF;
-  --text-main: #222222;
-  --text-muted: #757575;
-  --border-color: #E5E5E5;
+  --text-main: #1a1a1a;
+  --text-muted: #6b7280;
+  --border-color: #f0f0f0;
 }
 
 body {
@@ -17,33 +17,46 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.bg-primary-brand {
-  background-color: #EE4D2D;
-}
-.bg-primary-brand-dark {
-  background-color: #D73211;
-}
-.text-primary-brand {
-  color: #EE4D2D;
-}
-.border-primary-brand {
-  border-color: #EE4D2D;
-}
+/* ─── Brand Utilities ─── */
+.bg-primary-brand { background-color: #EE4D2D; }
+.bg-primary-brand-dark { background-color: #D73211; }
+.text-primary-brand { color: #EE4D2D; }
+.border-primary-brand { border-color: #EE4D2D; }
 
-/* Custom scrollbar */
+/* ─── Premium Scrollbar ─── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 4px;
+  background: #d1d5db;
+  border-radius: 100px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #999;
+  background: #9ca3af;
+}
+
+/* ─── Smooth Scroll ─── */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ─── Selection Color ─── */
+::selection {
+  background: rgba(238, 77, 45, 0.15);
+  color: #D73211;
+}
+
+/* ─── Premium Focus Ring ─── */
+:focus-visible {
+  outline: 2px solid rgba(238, 77, 45, 0.5);
+  outline-offset: 2px;
+  border-radius: 8px;
 }

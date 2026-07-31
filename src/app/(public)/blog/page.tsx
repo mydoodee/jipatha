@@ -7,6 +7,7 @@ import { POSTS_PER_PAGE } from "@/config/constants";
 import { BookOpen } from "lucide-react";
 
 export const revalidate = 3600;
+export const dynamic = "force-static";
 
 export const metadata = constructMetadata({
   title: "บทความทั้งหมด — คู่มือการซื้อและรีวิวสินค้า",

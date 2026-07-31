@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPosts } from "@/lib/firebase/services/posts";
 
+export const dynamic = "force-static";
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

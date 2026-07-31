@@ -6,6 +6,7 @@ import { constructMetadata } from "@/lib/seo/metadata";
 import { PRODUCTS_PER_PAGE } from "@/config/constants";
 
 export const revalidate = 3600;
+export const dynamic = "force-static";
 
 export const metadata = constructMetadata({
   title: "สินค้าทั้งหมด — รีวิวและแนะนำสินค้าราคาพิเศษ",

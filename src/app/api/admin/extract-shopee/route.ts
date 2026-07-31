@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-static";
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -107,45 +109,65 @@ function detectCategory(title: string, description: string): { name: string; slu
  * Tries multiple User-Agents because Shopee behaves differently per bot.
  */
 async function resolveShortLink(targetUrl: string): Promise<string> {
-  const userAgents = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Twitterbot/1.0",
-    "",
-  ];
-
-  for (const ua of userAgents) {
-    try {
-      const headers: Record<string, string> = {};
-      if (ua) headers["User-Agent"] = ua;
-
-      const res = await fetch(targetUrl, {
-        method: "GET",
-        redirect: "manual",
-        headers,
-      });
-
-      const location = res.headers.get("location");
-      if (location && location.includes("shopee.co.th")) {
-        return location;
-      }
-    } catch {
-      // try next UA
-    }
+  if (!targetUrl.includes("s.shopee.co.th") && !targetUrl.includes("shopee.co.th/s/")) {
+    return targetUrl;
   }
 
-  // Fallback: follow redirect fully
+  // Method A: Manual redirect to capture Location header (301/302)
   try {
     const res = await fetch(targetUrl, {
-      redirect: "follow",
+      method: "GET",
+      redirect: "manual",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
       },
     });
-    return res.url;
+    const location = res.headers.get("location");
+    if (location && location.includes("shopee.co.th")) {
+      return location;
+    }
   } catch {
-    return targetUrl;
+    // fallback
   }
+
+  // Method B: Follow redirect
+  try {
+    const res = await fetch(targetUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
+      },
+    });
+
+    if (res.url && !res.url.includes("s.shopee.co.th")) {
+      return res.url;
+    }
+
+    // Method C: Parse HTML body if res.url is still s.shopee.co.th
+    const htmlText = await res.text();
+    const urlMatch =
+      htmlText.match(/property=["']og:url["']\s*content=["']([^"']+)["']/i) ||
+      htmlText.match(/content=["']([^"']+)["']\s*property=["']og:url["']/i) ||
+      htmlText.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i) ||
+      htmlText.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i) ||
+      htmlText.match(/href=["'](https?:\/\/shopee\.co\.th\/[^"']+)["']/i);
+
+    if (urlMatch?.[1]) {
+      return urlMatch[1];
+    }
+    const rawMatch = htmlText.match(/https?:\/\/shopee\.co\.th\/[^\s"'<>]+/i);
+    if (rawMatch?.[0]) {
+      return rawMatch[0];
+    }
+  } catch {
+    // fallback
+  }
+
+  return targetUrl;
 }
 
 /**
@@ -154,10 +176,54 @@ async function resolveShortLink(targetUrl: string): Promise<string> {
  *   /shopName/shopId/itemId
  *   /product-name-i.shopId.itemId
  */
-function extractIds(url: string): { shopId: string; itemId: string } | null {
-  const m = url.match(/\/(\d+)\/(\d+)/) || url.match(/i\.(\d+)\.(\d+)/);
-  if (m) return { shopId: m[1], itemId: m[2] };
+/**
+ * Extract shopId and itemId from Shopee URL formats:
+ *   /product/shopId/itemId
+ *   /product/itemId
+ *   /universal-link/product/itemId
+ *   /product-name-i.shopId.itemId
+ */
+function extractIds(url: string): { shopId?: string; itemId: string } | null {
+  const productMatch = url.match(/\/product\/(?:(\d+)\/)?(\d+)/);
+  if (productMatch) {
+    return { shopId: productMatch[1] || undefined, itemId: productMatch[2] };
+  }
+
+  const iMatch = url.match(/i\.(\d+)\.(\d+)/);
+  if (iMatch) {
+    return { shopId: iMatch[1], itemId: iMatch[2] };
+  }
+
+  const numMatch = url.match(/\/(\d{8,12})(?:\?|\/|$)/);
+  if (numMatch) {
+    return { itemId: numMatch[1] };
+  }
+
   return null;
+}
+
+function extractNameFromUrlPath(urlStr: string): string {
+  try {
+    const parsed = new URL(urlStr);
+    const pathname = decodeURIComponent(parsed.pathname);
+    const parts = pathname.split("/").filter(Boolean);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p === "universal-link" || p === "product") continue;
+      let name = p.replace(/-i\.\d+\.\d+$/, "").replace(/[\-_]/g, " ").trim();
+      name = name.replace(/\?.*$/, "").replace(/__mobile__.*$/, "").trim();
+      
+      // Reject short alphanumeric hashes like "opaanlp" or "111lHS0AnS"
+      if (name.match(/^[a-zA-Z0-9]{4,15}$/)) continue;
+
+      if (name && name.length > 3 && !name.match(/^[\d\s]+$/)) {
+        return name;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return "";
 }
 
 export async function POST(req: NextRequest) {
@@ -179,78 +245,115 @@ export async function POST(req: NextRequest) {
     // ── Step 1: Resolve short link ─────────────────────────
     const resolvedUrl = await resolveShortLink(targetUrl);
 
-    // ── Step 2: Build canonical product URL ────────────────
-    const ids = extractIds(resolvedUrl);
-    const fetchUrl = ids
-      ? `https://shopee.co.th/product/${ids.shopId}/${ids.itemId}`
-      : resolvedUrl;
+    // ── Step 2: Extract IDs ────────────────────────────────
+    const ids = extractIds(resolvedUrl) || extractIds(targetUrl);
 
-    // ── Step 3: Fetch SSR HTML via Twitterbot ──────────────
-    // Shopee serves full OpenGraph metadata + embedded JSON to Twitterbot
-    let html = "";
-    try {
-      const pageRes = await fetch(fetchUrl, {
-        method: "GET",
-        headers: {
-          "User-Agent": "Twitterbot/1.0",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
-        },
-      });
-      html = await pageRes.text();
-    } catch {
-      // ignore
-    }
-
-    // ── Step 4: Extract metadata ───────────────────────────
-
-    // Title
-    let title = "";
-    const ogTitleMatch =
-      html.match(
-        /property=["']og:title["']\s*content=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /content=["']([^"']+)["']\s*property=["']og:title["']/i
-      );
-    if (ogTitleMatch?.[1]) {
-      title = ogTitleMatch[1];
-    } else {
-      const titleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-      if (titleTag?.[1]) title = titleTag[1];
-    }
-    title = title.replace(/\s*\|\s*Shopee.*$/i, "").trim();
-
-    // Image
+    let title = extractNameFromUrlPath(resolvedUrl) || extractNameFromUrlPath(targetUrl);
     let image = "";
-    const ogImageMatch =
-      html.match(
-        /property=["']og:image["']\s*content=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /content=["']([^"']+)["']\s*property=["']og:image["']/i
-      );
-    if (ogImageMatch?.[1]) {
-      image = ogImageMatch[1];
+    let description = "";
+    let price = 0;
+    let originalPrice = 0;
+    let html = "";
+
+    // ── Step 3: Try Shopee Official API by Item ID ──────────
+    if (ids?.itemId) {
+      try {
+        const apiUrl = ids.shopId
+          ? `https://shopee.co.th/api/v4/item/get?itemid=${ids.itemId}&shopid=${ids.shopId}`
+          : `https://shopee.co.th/api/v4/item/get?itemid=${ids.itemId}`;
+
+        const apiRes = await fetch(apiUrl, {
+          method: "GET",
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            Referer: resolvedUrl || "https://shopee.co.th/",
+          },
+        });
+
+        if (apiRes.ok) {
+          const apiJson = await apiRes.json();
+          const item = apiJson?.data || apiJson?.item;
+          if (item) {
+            if (item.name) title = item.name;
+            if (item.description) description = item.description;
+            if (item.price) {
+              let p = parseFloat(item.price);
+              if (p > 100000) p = p / 100000;
+              price = p;
+            }
+            if (item.price_before_discount) {
+              let op = parseFloat(item.price_before_discount);
+              if (op > 100000) op = op / 100000;
+              originalPrice = op;
+            }
+            if (item.images && item.images.length > 0) {
+              image = `https://down-aka-th.img.susercontent.com/${item.images[0]}`;
+            }
+          }
+        }
+      } catch {
+        // Fallback to HTML scraping below if API fails
+      }
     }
 
-    // Description
-    let description = "";
-    const ogDescMatch =
-      html.match(
-        /property=["']og:description["']\s*content=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /content=["']([^"']+)["']\s*property=["']og:description["']/i
-      );
-    if (ogDescMatch?.[1]) {
-      description = ogDescMatch[1].trim();
+    // ── Step 4: Fallback to HTML Scraping via Twitterbot ───
+    if (!title || !price) {
+      const fetchUrl = ids?.shopId
+        ? `https://shopee.co.th/product/${ids.shopId}/${ids.itemId}`
+        : resolvedUrl;
+
+      try {
+        const pageRes = await fetch(fetchUrl, {
+          method: "GET",
+          headers: {
+            "User-Agent": "Twitterbot/1.0",
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
+          },
+        });
+        html = await pageRes.text();
+      } catch {
+        // ignore
+      }
+
+      if (!title) {
+        const ogTitleMatch =
+          html.match(/property=["']og:title["']\s*content=["']([^"']+)["']/i) ||
+          html.match(/content=["']([^"']+)["']\s*property=["']og:title["']/i);
+        if (ogTitleMatch?.[1]) {
+          title = ogTitleMatch[1];
+        } else {
+          const titleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+          if (titleTag?.[1]) title = titleTag[1];
+        }
+        title = title.replace(/\s*\|\s*Shopee.*$/i, "").trim();
+        if (title.match(/^[\d\s\?\&\=\_\-]+$/) || title.includes("__mobile__")) {
+          title = "";
+        }
+      }
+
+      if (!image) {
+        const ogImageMatch =
+          html.match(/property=["']og:image["']\s*content=["']([^"']+)["']/i) ||
+          html.match(/content=["']([^"']+)["']\s*property=["']og:image["']/i);
+        if (ogImageMatch?.[1]) {
+          image = ogImageMatch[1];
+        }
+      }
+
+      if (!description || description.includes("Buy and Sell on Mobile")) {
+        const ogDescMatch =
+          html.match(/property=["']og:description["']\s*content=["']([^"']+)["']/i) ||
+          html.match(/content=["']([^"']+)["']\s*property=["']og:description["']/i);
+        if (ogDescMatch?.[1] && !ogDescMatch[1].includes("Buy and Sell on Mobile")) {
+          description = ogDescMatch[1].trim();
+        }
+      }
     }
 
     // ── Step 5: Extract Price (multi-strategy) ─────────────
-    let price = 0;
-    let originalPrice = 0;
 
     // Strategy A: OG meta tag product:price:amount
     const ogPriceMatch =

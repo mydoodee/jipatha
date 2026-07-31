@@ -80,6 +80,222 @@ export function ProductForm({
     }
   };
 
+  const isShopeeShortLink = (urlStr: string) => {
+    return urlStr.includes("s.shopee.co.th") || urlStr.match(/\/s\/[a-zA-Z0-9]/);
+  };
+
+  const extractTitleFromUrl = (urlStr: string): string => {
+    if (isShopeeShortLink(urlStr)) return ""; // NEVER use short hash as title!
+    try {
+      const parsedUrl = new URL(urlStr);
+      const pathname = decodeURIComponent(parsedUrl.pathname);
+      const parts = pathname.split("/").filter(Boolean);
+
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i];
+        if (part === "universal-link" || part === "product") continue;
+        let clean = part.replace(/-i\.\d+\.\d+$/, "").replace(/[\-_]/g, " ").trim();
+        clean = clean.replace(/\?.*$/, "").replace(/__mobile__.*$/, "").trim();
+        // Require Thai characters or long descriptive words (never short code like 3qLwdKMIOw)
+        if (clean && clean.length > 5 && (clean.match(/[\u0E00-\u0E7F]/) || clean.includes(" "))) {
+          return clean;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return "";
+  };
+
+  const fetchMetadataFromApis = async (targetUrl: string): Promise<{ title: string; image: string; description: string; price: number; resolvedUrl: string }> => {
+    let title = extractTitleFromUrl(targetUrl);
+    let image = "";
+    let description = "";
+    let price = 0;
+    let resolvedUrl = targetUrl;
+
+    // 1. Resolve short link via proxy to get final URL with item ID
+    if (isShopeeShortLink(targetUrl)) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, { signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status && json.status.url && !json.status.url.includes("s.shopee.co.th")) {
+            resolvedUrl = json.status.url;
+          }
+          if (resolvedUrl.includes("s.shopee.co.th") && json.contents) {
+            const html = json.contents;
+            const match = html.match(/property=["']og:url["']\s*content=["']([^"']+)["']/i) ||
+                          html.match(/href=["'](https?:\/\/shopee\.co\.th\/[^"']+)["']/i) ||
+                          html.match(/(https:\/\/shopee\.co\.th\/[^\s"'<>]+)/i);
+            if (match?.[1] || match?.[0]) {
+              resolvedUrl = match[1] || match[0];
+            }
+          }
+        }
+      } catch {
+        // Ignore CORS error or timeout
+      }
+    }
+
+    // 2. Extract item ID from resolved URL or target URL
+    const itemIdMatch = resolvedUrl.match(/\/product\/(?:(\d+)\/)?(\d+)/) ||
+                        resolvedUrl.match(/i\.(\d+)\.(\d+)/) ||
+                        targetUrl.match(/\/product\/(?:(\d+)\/)?(\d+)/) ||
+                        targetUrl.match(/i\.(\d+)\.(\d+)/) ||
+                        resolvedUrl.match(/\/(\d{8,12})(?:\?|\/|$)/);
+
+    const itemId = itemIdMatch ? (itemIdMatch[2] || itemIdMatch[1]) : null;
+    const shopId = itemIdMatch && itemIdMatch[2] ? itemIdMatch[1] : null;
+
+    // 3. Try Shopee official item API via item ID
+    if (itemId) {
+      try {
+        const shopeeApiUrl = shopId
+          ? `https://shopee.co.th/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`
+          : `https://shopee.co.th/api/v4/item/get?itemid=${itemId}`;
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(shopeeApiUrl)}`, { signal: controller.signal });
+        clearTimeout(timer);
+
+        if (proxyRes.ok) {
+          const proxyJson = await proxyRes.json();
+          const itemJson = JSON.parse(proxyJson.contents || "{}");
+          const item = itemJson.data || itemJson.item;
+          if (item) {
+            if (item.name) title = item.name;
+            if (item.description) description = item.description;
+            if (item.price) {
+              let p = parseFloat(item.price);
+              if (p > 100000) p = p / 100000;
+              price = p;
+            }
+            if (item.images && item.images.length > 0) {
+              image = `https://down-th.img.susercontent.com/file/${item.images[0]}`;
+            }
+          }
+        }
+      } catch {
+        // Ignore API fallback error
+      }
+    }
+
+    // 4. Microlink API Fallback if item API didn't return title
+    if (!title || title.match(/^[\d\s]+$/)) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, { signal: controller.signal });
+        clearTimeout(timer);
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === "success" && json.data) {
+            const d = json.data;
+            if (d.title && !d.title.toLowerCase().includes("shopee thailand") && d.title !== "Shopee") {
+              const rawTitle = d.title.replace(/\s*\|\s*Shopee.*$/i, "").trim();
+              if (!rawTitle.match(/^[\d\s\?\&\=\_\-]+$/) && !rawTitle.includes("__mobile__") && rawTitle.length > 3) {
+                title = rawTitle;
+              }
+            }
+            if (d.image?.url && !image) {
+              image = d.image.url;
+            }
+            if (d.description && !d.description.includes("Buy and Sell on Mobile") && !description) {
+              description = d.description.trim();
+            }
+            if (d.url && d.url.includes("shopee")) {
+              resolvedUrl = d.url;
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    // 5. Decode Title from resolved URL path if title is still missing
+    if (!title || title.match(/^[\d\s]+$/)) {
+      const urlTitle = extractTitleFromUrl(resolvedUrl);
+      if (urlTitle) title = urlTitle;
+    }
+
+    // Clean description if generic
+    if (description.includes("Buy and Sell on Mobile")) {
+      description = "";
+    }
+
+    // Extract price from title or description if not found yet
+    if (!price) {
+      const textToSearch = `${title} ${description}`;
+      const priceMatch = textToSearch.match(/[฿]\s*([\d,]+(?:\.\d+)?)/) ||
+                         textToSearch.match(/(?:ราคา|เพียง)\s*([\d,]+(?:\.\d+)?)\s*(?:บาท|\.-)/i) ||
+                         textToSearch.match(/([\d,]+)\s*บาท/i);
+      if (priceMatch?.[1]) {
+        const p = parseFloat(priceMatch[1].replace(/,/g, ""));
+        if (p > 0 && p < 1000000) price = p;
+      }
+    }
+
+    // Clean description if generic
+    if (description.includes("Buy and Sell on Mobile")) {
+      description = "";
+    }
+
+    // Extract price from title or description if not found yet
+    if (!price) {
+      const textToSearch = `${title} ${description}`;
+      const priceMatch = textToSearch.match(/[฿]\s*([\d,]+(?:\.\d+)?)/) ||
+                         textToSearch.match(/(?:ราคา|เพียง)\s*([\d,]+(?:\.\d+)?)\s*(?:บาท|\.-)/i) ||
+                         textToSearch.match(/([\d,]+)\s*บาท/i);
+      if (priceMatch?.[1]) {
+        const p = parseFloat(priceMatch[1].replace(/,/g, ""));
+        if (p > 0 && p < 1000000) price = p;
+      }
+    }
+
+    return { title, image, description, price, resolvedUrl };
+  };
+
+  const extractShopeeClientSide = async (targetUrl: string) => {
+    let cleanUrl = targetUrl.trim();
+    if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+      cleanUrl = `https://${cleanUrl}`;
+    }
+
+    const { title, image, description, price, resolvedUrl } = await fetchMetadataFromApis(cleanUrl);
+
+    const displayTitle = title || "สินค้าจาก Shopee";
+    const slug = generateSlug(displayTitle) || `shopee-item-${Date.now()}`;
+    const computedOrigPrice = price > 0 ? price + 5 : 0;
+    const computedDiscount = computedOrigPrice > price ? Math.round(((computedOrigPrice - price) / computedOrigPrice) * 100) : 0;
+
+    return {
+      name: displayTitle,
+      slug,
+      price,
+      originalPrice: computedOrigPrice,
+      discountPercent: computedDiscount,
+      images: image ? [image] : [],
+      shortDescription: description ? description.slice(0, 160) : `แนะนำ ${displayTitle} การันตีคุณภาพ ราคาคุ้มค่าที่สุด`,
+      description: description || `รายละเอียดสินค้า ${displayTitle} สามารถเช็คโปรโมชั่นล่าสุดและคูปองส่วนลดเพิ่มเติมได้ที่ปุ่มเช็คราคา`,
+      affiliateUrl: cleanUrl,
+      suggestedCategory: { name: "สินค้าทั่วไป", slug: "general-products" },
+      seo: {
+        title: `${displayTitle} — ราคาพิเศษ Shopee`,
+        description: `ซื้อ ${displayTitle} ราคาดีที่สุด เช็คส่วนลดได้ที่นี่`,
+        keywords: [displayTitle, "Shopee Affiliate", "ส่วนลด Shopee"],
+      },
+    };
+  };
+
+
+
   const handleAutoExtract = async () => {
     if (!extractUrl.trim()) {
       setStatusBanner({
@@ -93,18 +309,40 @@ export function ProductForm({
     setExtractSuccess(false);
 
     try {
-      const res = await fetch("/api/admin/extract-shopee", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: extractUrl.trim() }),
-      });
+      let d: any = null;
 
-      const result = await res.json();
-      if (!res.ok || !result.data) {
-        throw new Error(result.error || "ไม่สามารถดึงข้อมูลจากลิงก์นี้ได้");
+      // Step 1: Try local API endpoint (if running Next.js SSR server)
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 7000);
+        const res = await fetch("/api/admin/extract-shopee", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: extractUrl.trim() }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+
+        const contentType = res.headers.get("content-type") || "";
+        if (res.ok && contentType.includes("application/json")) {
+          const result = await res.json();
+          if (result && result.data && result.data.name && !result.data.name.includes("สินค้าคุณภาพจาก Shopee")) {
+            d = result.data;
+          }
+        }
+      } catch {
+        // Ignore API route error on static export
       }
 
-      const d = result.data;
+      // Step 2: Client-side fallback if API route returned HTML or generic name
+      if (!d) {
+        d = await extractShopeeClientSide(extractUrl.trim());
+      }
+
+      if (!d || !d.name) {
+        throw new Error("ไม่สามารถอ่านข้อมูลจาก URL นี้ได้ กรุณากรอกข้อมูลสินค้าโดยตรง");
+      }
+
       setValue("name", d.name);
       setValue("slug", d.slug);
       setValue("price", d.price);
@@ -147,7 +385,6 @@ export function ProductForm({
           setValue("categoryId", existing.id);
           createdCategoryName = existing.name;
         } else {
-          // Auto-create category in Firestore directly without prompting
           try {
             const cleanName = targetName.trim();
             const slug = targetSlug || generateSlug(cleanName) || `cat-${Date.now()}`;
@@ -185,12 +422,12 @@ export function ProductForm({
       if (!d.price || d.price === 0) {
         setStatusBanner({
           type: "warning",
-          message: `✨ ดึงชื่อสินค้า, ลิงก์, รูปภาพ, SEO และจัด${catMsg} ให้อัตโนมัติแล้ว! (Shopee บล็อกตัวเลขราคา กรุณาใส่ราคาขายในช่องด้านล่าง)`,
+          message: `✨ เติมข้อมูลสินค้า, ลิงก์, รูปภาพ และ SEO ให้อัตโนมัติเรียบร้อยแล้ว! (กรุณาใส่ราคาขายในช่องด้านล่าง)`,
         });
       } else {
         setStatusBanner({
           type: "success",
-          message: `✨ ดึงข้อมูลสินค้าครบถ้วน และจัด${catMsg} ให้อัตโนมัติเรียบร้อยแล้ว!`,
+          message: `✨ ดึงข้อมูลสินค้าสำเร็จ และจัด${catMsg} ให้อัตโนมัติเรียบร้อยแล้ว!`,
         });
       }
     } catch (err: unknown) {

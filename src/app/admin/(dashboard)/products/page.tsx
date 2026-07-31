@@ -2,8 +2,8 @@ import Link from "next/link";
 import { getProducts } from "@/lib/firebase/services/products";
 import { Plus, Edit, ExternalLink, Package } from "lucide-react";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const dynamic = "force-static";
+export const revalidate = 3600;
 
 export default async function AdminProductsPage() {
   const products = await getProducts({ status: "all", limitCount: 100 });
