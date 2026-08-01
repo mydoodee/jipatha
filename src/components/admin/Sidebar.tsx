@@ -18,11 +18,13 @@ import {
   LogOut,
   User as UserIcon,
   ShieldCheck,
+  Bot,
 } from "lucide-react";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   "/admin/dashboard": LayoutDashboard,
   "/admin/products": Package,
+  "/admin/auto-import": Bot,
   "/admin/categories": Folder,
   "/admin/posts": BookOpen,
   "/admin/affiliate": LinkIcon,
