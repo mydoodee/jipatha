@@ -708,6 +708,7 @@ export function ProductForm({
               step="any"
               {...register("price", {
                 valueAsNumber: true,
+                setValueAs: (v) => (v === "" || isNaN(v) ? 0 : Number(v)),
                 onChange: (e) => {
                   const val = parseFloat(e.target.value);
                   if (!isNaN(val) && val > 0) {
@@ -729,7 +730,10 @@ export function ProductForm({
             <input
               type="number"
               step="any"
-              {...register("originalPrice", { valueAsNumber: true })}
+              {...register("originalPrice", {
+                valueAsNumber: true,
+                setValueAs: (v) => (v === "" || isNaN(v) ? undefined : Number(v)),
+              })}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
             />
           </div>
@@ -743,7 +747,10 @@ export function ProductForm({
               step="0.1"
               min="0"
               max="5"
-              {...register("rating", { valueAsNumber: true })}
+              {...register("rating", {
+                valueAsNumber: true,
+                setValueAs: (v) => (v === "" || isNaN(v) ? 5 : Number(v)),
+              })}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:outline-none"
             />
           </div>

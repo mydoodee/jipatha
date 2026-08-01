@@ -4,7 +4,7 @@ export const productSchema = z.object({
   name: z
     .string()
     .min(1, "กรุณาระบุชื่อสินค้า")
-    .max(200, "ชื่อสินค้าต้องไม่เกิน 200 ตัวอักษร"),
+    .max(500, "ชื่อสินค้าต้องไม่เกิน 500 ตัวอักษร"),
   slug: z
     .string()
     .min(1, "กรุณาระบุ Slug")
@@ -14,8 +14,7 @@ export const productSchema = z.object({
     ),
   shortDescription: z
     .string()
-    .min(1, "กรุณาระบุรายละเอียดสั้น")
-    .max(300, "รายละเอียดสั้นต้องไม่เกิน 300 ตัวอักษร"),
+    .min(1, "กรุณาระบุรายละเอียดสั้น"),
   description: z.string().min(1, "กรุณาระบุรายละเอียดสินค้า"),
   images: z.array(z.string()),
   price: z.number().min(0, "ราคาต้องมากกว่าหรือเท่ากับ 0"),
@@ -29,11 +28,8 @@ export const productSchema = z.object({
   affiliateUrl: z.string().optional(),
   status: z.enum(["draft", "published"]),
   featured: z.boolean(),
-  seoTitle: z.string().max(70, "SEO Title ต้องไม่เกิน 70 ตัวอักษร").optional(),
-  seoDescription: z
-    .string()
-    .max(160, "SEO Description ต้องไม่เกิน 160 ตัวอักษร")
-    .optional(),
+  seoTitle: z.string().optional(),
+  seoDescription: z.string().optional(),
 });
 
 export type ProductFormData = z.infer<typeof productSchema>;
