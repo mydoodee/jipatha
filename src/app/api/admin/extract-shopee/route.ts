@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// force-static for production static export compatibility.
-// In dev mode (yarn dev), Next.js still runs this POST handler dynamically.
-export const dynamic = "force-static";
+export const dynamic = "force-dynamic";
 
 function slugify(text: string): string {
   return text
@@ -196,7 +194,7 @@ function extractIds(url: string): { shopId?: string; itemId: string } | null {
   }
 
   // /product/shopId/itemId or /username/shopId/itemId
-  const productMatch = url.match(/\/(?:product\/)?(\d{5,15})\/(\d{5,15})/);
+  const productMatch = url.match(/\/(?:[a-zA-Z0-9_\.-]+\/)?(\d{5,15})\/(\d{5,15})/);
   if (productMatch) {
     return { shopId: productMatch[1], itemId: productMatch[2] };
   }
