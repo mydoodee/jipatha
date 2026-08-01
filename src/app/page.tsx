@@ -7,7 +7,6 @@ import { BlogCard } from "@/components/blog/BlogCard";
 import { AffiliateDisclosure } from "@/components/affiliate/AffiliateDisclosure";
 import { SeoJsonLd } from "@/components/seo/SeoJsonLd";
 import { generateWebSiteSchema, generateOrganizationSchema } from "@/lib/seo/schema";
-import { SearchBar } from "@/components/ui/SearchBar";
 import {
   ShoppingBag,
   Sparkles,
@@ -23,7 +22,8 @@ import {
 } from "lucide-react";
 import { siteConfig } from "@/config/site";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /* ─── category icon/color palette ─── */
 const categoryStyles = [
@@ -42,7 +42,7 @@ const categoryEmojis = ["🛒", "🎮", "👗", "🏠", "💄", "📱", "🍜", 
 export default async function HomePage() {
   const [featuredProducts, latestProducts, categories, latestPosts] = await Promise.all([
     getProducts({ featured: true, limitCount: 4 }),
-    getProducts({ limitCount: 8 }),
+    getProducts({ limitCount: 12 }),
     getCategories("active"),
     getPosts({ limitCount: 3 }),
   ]);
@@ -51,34 +51,6 @@ export default async function HomePage() {
     <>
       <SeoJsonLd data={generateWebSiteSchema()} />
       <SeoJsonLd data={generateOrganizationSchema()} />
-
-
-
-      {/* ═══════════════════════════════════════════════════════
-          TRUST STRIP — Value propositions
-         ═══════════════════════════════════════════════════════ */}
-      <section className="bg-white border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
-            {[
-              { icon: BadgePercent, label: "ราคาดีที่สุด", sub: "เปรียบเทียบให้แล้ว" },
-              { icon: Truck, label: "ส่งไว ส่งฟรี", sub: "หลากหลายดีล" },
-              { icon: ShieldCheck, label: "สินค้าคุณภาพ", sub: "คัดสรรจากร้านดัง" },
-              { icon: HeadphonesIcon, label: "รีวิวจริง", sub: "จากผู้ใช้งานจริง" },
-            ].map((item, i) => (
-              <div key={i} className="flex items-center gap-3 py-2">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-rose-500 text-white flex items-center justify-center flex-shrink-0 shadow-md shadow-orange-200/50">
-                  <item.icon className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="font-bold text-sm text-gray-900">{item.label}</p>
-                  <p className="text-xs text-gray-500">{item.sub}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-16">
 
@@ -245,6 +217,30 @@ export default async function HomePage() {
             </div>
           </section>
         )}
+
+        {/* ═══════════════════════════════════════════════════════
+            TRUST STRIP — Value propositions (Moved to bottom)
+           ═══════════════════════════════════════════════════════ */}
+        <section className="bg-white rounded-3xl border border-gray-100 p-6 shadow-xs">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
+            {[
+              { icon: BadgePercent, label: "ราคาดีที่สุด", sub: "เปรียบเทียบให้แล้ว" },
+              { icon: Truck, label: "ส่งไว ส่งฟรี", sub: "หลากหลายดีล" },
+              { icon: ShieldCheck, label: "สินค้าคุณภาพ", sub: "คัดสรรจากร้านดัง" },
+              { icon: HeadphonesIcon, label: "รีวิวจริง", sub: "จากผู้ใช้งานจริง" },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-3 py-2">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-rose-500 text-white flex items-center justify-center flex-shrink-0 shadow-md shadow-orange-200/50">
+                  <item.icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-gray-900">{item.label}</p>
+                  <p className="text-xs text-gray-500">{item.sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {/* ═══════════════════════════════════════════════════════
             SEO / ABOUT SECTION — Premium card
