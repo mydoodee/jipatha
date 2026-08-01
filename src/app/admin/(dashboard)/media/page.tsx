@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { uploadFile, listFiles, deleteFile } from "@/lib/firebase/storage";
 import { STORAGE_PATHS } from "@/config/constants";
-import { Image as ImageIcon, Upload, Copy, Check, Trash2, Folder } from "lucide-react";
+import { Image as ImageIcon, Upload, Copy, Check, Trash2, Folder, Cloud, RefreshCw } from "lucide-react";
 
 export default function AdminMediaPage() {
   const [selectedFolder, setSelectedFolder] = useState<string>("products");
@@ -15,8 +14,13 @@ export default function AdminMediaPage() {
   const loadMedia = useCallback(async (folder: string) => {
     setLoading(true);
     try {
-      const items = await listFiles(folder);
-      setFiles(items);
+      const res = await fetch(`/api/admin/media/list?folder=${folder}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.items)) {
+        setFiles(data.items);
+      } else {
+        setFiles([]);
+      }
     } catch (err) {
       console.error("Error listing files:", err);
       setFiles([]);
@@ -26,28 +30,8 @@ export default function AdminMediaPage() {
   }, []);
 
   useEffect(() => {
-    let ignore = false;
-    async function init() {
-      setLoading(true);
-      try {
-        const items = await listFiles(selectedFolder);
-        if (!ignore) {
-          setFiles(items);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Error listing files:", err);
-        if (!ignore) {
-          setFiles([]);
-          setLoading(false);
-        }
-      }
-    }
-    init();
-    return () => {
-      ignore = true;
-    };
-  }, [selectedFolder]);
+    loadMedia(selectedFolder);
+  }, [selectedFolder, loadMedia]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
@@ -56,12 +40,22 @@ export default function AdminMediaPage() {
     setUploading(true);
     try {
       const file = fileList[0];
-      const filename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
-      const path = `${selectedFolder}/${filename}`;
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", selectedFolder);
 
-      await uploadFile(path, file);
-      await loadMedia(selectedFolder);
-      alert("อัปโหลดไฟล์เรียบร้อยแล้ว");
+      const res = await fetch("/api/admin/media/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        await loadMedia(selectedFolder);
+        alert("อัปโหลดไฟล์ไปยัง Vercel Storage เรียบร้อยแล้ว!");
+      } else {
+        throw new Error(data.error || "เกิดข้อผิดพลาดในการอัปโหลดไฟล์");
+      }
     } catch (err: unknown) {
       console.error("Upload error:", err);
       alert(err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการอัปโหลดไฟล์");
@@ -77,11 +71,18 @@ export default function AdminMediaPage() {
     setTimeout(() => setCopiedUrl(null), 2000);
   };
 
-  const handleDelete = async (fullPath: string) => {
-    if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการลบไฟล์นี้?")) return;
+  const handleDelete = async (url: string) => {
+    if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการลบไฟล์นี้จาก Vercel Storage?")) return;
     try {
-      await deleteFile(fullPath);
-      await loadMedia(selectedFolder);
+      const res = await fetch(`/api/admin/media/list?url=${encodeURIComponent(url)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadMedia(selectedFolder);
+      } else {
+        throw new Error(data.error || "เกิดข้อผิดพลาดในการลบไฟล์");
+      }
     } catch (err) {
       console.error("Delete file error:", err);
       alert("เกิดข้อผิดพลาดในการลบไฟล์");
@@ -92,23 +93,37 @@ export default function AdminMediaPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">คลังสื่อ (Media Library)</h1>
+          <div className="flex items-center gap-2">
+            <Cloud className="w-6 h-6 text-orange-600" />
+            <h1 className="text-2xl font-bold text-gray-900">คลังสื่อ (Vercel Free Storage)</h1>
+          </div>
           <p className="text-xs text-gray-500 mt-0.5">
-            จัดการรูปภาพและไฟล์บน Firebase Storage
+            จัดการรูปภาพและไฟล์บน Vercel Blob Storage ฟรี 1GB
           </p>
         </div>
 
-        <label className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs rounded-lg shadow-xs cursor-pointer transition-colors inline-flex items-center gap-1.5 w-fit">
-          <Upload className="w-4 h-4" />
-          <span>{uploading ? "กำลังอัปโหลด..." : "อัปโหลดรูปภาพใหม่"}</span>
-          <input
-            type="file"
-            accept="image/*"
-            disabled={uploading}
-            onChange={handleUpload}
-            className="hidden"
-          />
-        </label>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadMedia(selectedFolder)}
+            disabled={loading}
+            className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-200/60 rounded-lg transition-colors"
+            title="รีเฟรชรายการ"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+
+          <label className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs rounded-lg shadow-xs cursor-pointer transition-colors inline-flex items-center gap-1.5 w-fit">
+            <Upload className="w-4 h-4" />
+            <span>{uploading ? "กำลังอัปโหลด..." : "อัปโหลดรูปภาพใหม่ (Vercel)"}</span>
+            <input
+              type="file"
+              accept="image/*"
+              disabled={uploading}
+              onChange={handleUpload}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Folder Tabs */}
@@ -131,7 +146,10 @@ export default function AdminMediaPage() {
 
       {/* Media Grid */}
       {loading ? (
-        <div className="p-12 text-center text-xs text-gray-500">กำลังโหลดไฟล์สื่อ...</div>
+        <div className="p-12 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
+          <RefreshCw className="w-4 h-4 animate-spin text-orange-500" />
+          <span>กำลังโหลดไฟล์สื่อจาก Vercel Storage...</span>
+        </div>
       ) : files.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-xs">
           <ImageIcon className="w-10 h-10 mx-auto mb-2 text-gray-300" />
@@ -172,7 +190,7 @@ export default function AdminMediaPage() {
                   </button>
 
                   <button
-                    onClick={() => handleDelete(file.fullPath)}
+                    onClick={() => handleDelete(file.url)}
                     className="p-1 text-gray-400 hover:text-red-600 rounded"
                     title="ลบไฟล์"
                   >
