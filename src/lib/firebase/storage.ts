@@ -26,26 +26,47 @@ export async function uploadFile(
     throw new Error(`ขนาดไฟล์เกิน ${MAX_IMAGE_SIZE_MB}MB`);
   }
 
-  const storageRef = ref(storage, path);
-  const snapshot = await uploadBytes(storageRef, file, {
-    contentType: file.type,
-  });
-  return getDownloadURL(snapshot.ref);
+  try {
+    const storageRef = ref(storage, path);
+    const snapshot = await uploadBytes(storageRef, file, {
+      contentType: file.type,
+    });
+    return await getDownloadURL(snapshot.ref);
+  } catch (error: any) {
+    console.error("Firebase Storage Upload Error:", error);
+    if (error.code === "storage/retry-limit-exceeded" || error.code === "storage/unauthorized") {
+      throw new Error(
+        "ไม่สามารถอัปโหลดไปยัง Firebase Storage ได้ (กรุณาเปิดสิทธิ์ Firebase Storage Rules เป็น allow read, write: if true; ใน Firebase Console)"
+      );
+    }
+    throw error;
+  }
 }
 
 export async function deleteFile(path: string): Promise<void> {
-  const storageRef = ref(storage, path);
-  await deleteObject(storageRef);
+  try {
+    const storageRef = ref(storage, path);
+    await deleteObject(storageRef);
+  } catch (error: any) {
+    console.error("Firebase Storage Delete Error:", error);
+    if (error.code === "storage/object-not-found") return;
+    throw error;
+  }
 }
 
 export async function listFiles(path: string) {
-  const storageRef = ref(storage, path);
-  const result = await listAll(storageRef);
-  return Promise.all(
-    result.items.map(async (item) => ({
-      name: item.name,
-      fullPath: item.fullPath,
-      url: await getDownloadURL(item),
-    }))
-  );
+  try {
+    const storageRef = ref(storage, path);
+    const result = await listAll(storageRef);
+    return await Promise.all(
+      result.items.map(async (item) => ({
+        name: item.name,
+        fullPath: item.fullPath,
+        url: await getDownloadURL(item),
+      }))
+    );
+  } catch (error: any) {
+    console.error("Firebase Storage List Error:", error);
+    return [];
+  }
 }
