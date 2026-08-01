@@ -5,13 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
-// Generate SEO-friendly slug from text
+// Generate SEO-friendly slug from text (ASCII-only: a-z, 0-9, hyphens)
 export function generateSlug(text: string): string {
   return text
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, "")
+    // Remove all non-ASCII letters/digits (strips Thai, emojis, special chars)
+    .replace(/[^a-z0-9\s-]/g, "")
     .replace(/[\s_]+/g, "-")
+    .replace(/-{2,}/g, "-")
     .replace(/^-+|-+$/g, "");
 }
 

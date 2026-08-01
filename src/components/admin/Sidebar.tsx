@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { adminNavigation } from "@/config/navigation";
 import { siteConfig } from "@/config/site";
+import { useAuth } from "./AuthProvider";
 import {
   LayoutDashboard,
   Package,
@@ -13,8 +14,10 @@ import {
   Image as ImageIcon,
   BarChart3,
   Settings,
-  ShoppingBag,
   ExternalLink,
+  LogOut,
+  User as UserIcon,
+  ShieldCheck,
 } from "lucide-react";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -30,6 +33,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { profile, user, logout } = useAuth();
 
   return (
     <aside className="w-64 bg-gray-900 text-gray-300 min-h-screen flex flex-col flex-shrink-0 border-r border-gray-800">
@@ -84,6 +88,41 @@ export function Sidebar() {
           <span>ดูหน้าเว็บไซต์หลัก</span>
           <ExternalLink className="w-3.5 h-3.5" />
         </Link>
+      </div>
+
+      {/* User Profile & Logout */}
+      <div className="p-3 border-t border-gray-800 space-y-2.5">
+        {/* User Info */}
+        <div className="flex items-center gap-2.5 px-2">
+          <div className="w-8 h-8 bg-orange-500/20 text-orange-400 rounded-full flex items-center justify-center flex-shrink-0">
+            <UserIcon className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-white truncate">
+              {profile?.displayName || user?.email?.split("@")[0] || "Admin"}
+            </p>
+            <p className="text-[10px] text-gray-500 truncate">
+              {user?.email}
+            </p>
+          </div>
+        </div>
+
+        {/* Role Badge */}
+        <div className="flex items-center gap-1.5 px-2">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-[10px] font-semibold text-gray-400">
+            สิทธิ์: <span className="text-emerald-400 uppercase">{profile?.role || "Admin"}</span>
+          </span>
+        </div>
+
+        {/* Logout Button */}
+        <button
+          onClick={logout}
+          className="w-full flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/10 transition-colors"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span>ออกจากระบบ</span>
+        </button>
       </div>
     </aside>
   );

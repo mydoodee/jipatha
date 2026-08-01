@@ -107,6 +107,57 @@ export function ProductForm({
     return "";
   };
 
+  /**
+   * Helper to fetch via CORS proxy. Tries multiple proxies with fallback.
+   */
+  const fetchViaProxy = async (targetUrl: string, timeoutMs = 5000): Promise<{ contents: string; finalUrl: string } | null> => {
+    const proxies = [
+      (u: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+      (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    ];
+
+    for (const makeUrl of proxies) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(makeUrl(targetUrl), { signal: controller.signal });
+        clearTimeout(timer);
+
+        if (!res.ok) continue;
+
+        const contentType = res.headers.get("content-type") || "";
+
+        // allorigins returns JSON wrapper
+        if (contentType.includes("application/json")) {
+          const json = await res.json();
+          const contents = json.contents || "";
+          const finalUrl = json.status?.url || targetUrl;
+          if (contents) return { contents, finalUrl };
+        } else {
+          // corsproxy returns raw content
+          const text = await res.text();
+          if (text) return { contents: text, finalUrl: targetUrl };
+        }
+      } catch {
+        // Try next proxy
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Parse OG meta from HTML — handles both attribute orders:
+   *   property="og:title" content="..."
+   *   content="..." property="og:title"
+   */
+  const parseOgMeta = (html: string, property: string): string => {
+    const m1 = html.match(new RegExp(`property=["']${property}["']\\s+content=["']([^"']+)["']`, "i"));
+    if (m1?.[1]) return m1[1];
+    const m2 = html.match(new RegExp(`content=["']([^"']+)["']\\s+property=["']${property}["']`, "i"));
+    if (m2?.[1]) return m2[1];
+    return "";
+  };
+
   const fetchMetadataFromApis = async (targetUrl: string): Promise<{ title: string; image: string; description: string; price: number; resolvedUrl: string }> => {
     let title = extractTitleFromUrl(targetUrl);
     let image = "";
@@ -116,76 +167,96 @@ export function ProductForm({
 
     // 1. Resolve short link via proxy to get final URL with item ID
     if (isShopeeShortLink(targetUrl)) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 4000);
-        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, { signal: controller.signal });
-        clearTimeout(timer);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.status && json.status.url && !json.status.url.includes("s.shopee.co.th")) {
-            resolvedUrl = json.status.url;
-          }
-          if (resolvedUrl.includes("s.shopee.co.th") && json.contents) {
-            const html = json.contents;
-            const match = html.match(/property=["']og:url["']\s*content=["']([^"']+)["']/i) ||
-                          html.match(/href=["'](https?:\/\/shopee\.co\.th\/[^"']+)["']/i) ||
-                          html.match(/(https:\/\/shopee\.co\.th\/[^\s"'<>]+)/i);
-            if (match?.[1] || match?.[0]) {
-              resolvedUrl = match[1] || match[0];
+      const proxyResult = await fetchViaProxy(targetUrl, 5000);
+      if (proxyResult) {
+        if (proxyResult.finalUrl && !proxyResult.finalUrl.includes("s.shopee.co.th")) {
+          resolvedUrl = proxyResult.finalUrl;
+        }
+        // Search HTML for product URLs
+        if (resolvedUrl.includes("s.shopee.co.th") && proxyResult.contents) {
+          const html = proxyResult.contents;
+          const urlPatterns = [
+            /content=["']([^"']+)["']\s*property=["']og:url["']/i,
+            /property=["']og:url["']\s*content=["']([^"']+)["']/i,
+            /href=["'](https?:\/\/shopee\.co\.th\/[^"']+)["']/i,
+            /(https:\/\/shopee\.co\.th\/[^\s"'<>]+)/i,
+          ];
+          for (const pattern of urlPatterns) {
+            const match = html.match(pattern);
+            if (match?.[1]) {
+              resolvedUrl = match[1];
+              break;
             }
           }
         }
-      } catch {
-        // Ignore CORS error or timeout
       }
     }
 
     // 2. Extract item ID from resolved URL or target URL
-    const itemIdMatch = resolvedUrl.match(/\/product\/(?:(\d+)\/)?(\d+)/) ||
-                        resolvedUrl.match(/i\.(\d+)\.(\d+)/) ||
-                        targetUrl.match(/\/product\/(?:(\d+)\/)?(\d+)/) ||
-                        targetUrl.match(/i\.(\d+)\.(\d+)/) ||
-                        resolvedUrl.match(/\/(\d{8,12})(?:\?|\/|$)/);
+    // i.shopId.itemId format first (most reliable)
+    const iFormatMatch = resolvedUrl.match(/i\.(\d+)\.(\d+)/) || targetUrl.match(/i\.(\d+)\.(\d+)/);
+    // /product/shopId/itemId or /username/shopId/itemId
+    const pathMatch = resolvedUrl.match(/\/(?:product\/)?(\d{5,15})\/(\d{5,15})/) ||
+                      targetUrl.match(/\/(?:product\/)?(\d{5,15})\/(\d{5,15})/);
+    const bestMatch = iFormatMatch || pathMatch;
 
-    const itemId = itemIdMatch ? (itemIdMatch[2] || itemIdMatch[1]) : null;
-    const shopId = itemIdMatch && itemIdMatch[2] ? itemIdMatch[1] : null;
+    const shopId = bestMatch?.[1] || null;
+    const itemId = bestMatch?.[2] || bestMatch?.[1] || null;
 
-    // 3. Try Shopee official item API via item ID
-    if (itemId) {
-      try {
-        const shopeeApiUrl = shopId
-          ? `https://shopee.co.th/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`
-          : `https://shopee.co.th/api/v4/item/get?itemid=${itemId}`;
+    // 3. Scrape product page via Twitterbot UA proxy (Shopee serves SSR to social bots)
+    if (shopId && itemId) {
+      const scrapeUrl = `https://shopee.co.th/product/${shopId}/${itemId}`;
+      const proxyResult = await fetchViaProxy(scrapeUrl, 8000);
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 4000);
-        const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(shopeeApiUrl)}`, { signal: controller.signal });
-        clearTimeout(timer);
+      if (proxyResult?.contents) {
+        const html = proxyResult.contents;
 
-        if (proxyRes.ok) {
-          const proxyJson = await proxyRes.json();
-          const itemJson = JSON.parse(proxyJson.contents || "{}");
-          const item = itemJson.data || itemJson.item;
-          if (item) {
-            if (item.name) title = item.name;
-            if (item.description) description = item.description;
-            if (item.price) {
-              let p = parseFloat(item.price);
-              if (p > 100000) p = p / 100000;
-              price = p;
+        // Parse JSON-LD Product data (most reliable source)
+        const jsonLdRegex = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
+        let jsonLdMatch;
+        while ((jsonLdMatch = jsonLdRegex.exec(html)) !== null) {
+          try {
+            const jsonData = JSON.parse(jsonLdMatch[1]);
+            if (jsonData["@type"] === "Product") {
+              if (jsonData.name) title = jsonData.name;
+              if (jsonData.description) description = jsonData.description;
+              if (jsonData.image) {
+                image = typeof jsonData.image === "string" ? jsonData.image : jsonData.image[0];
+              }
+              if (jsonData.offers) {
+                if (jsonData.offers.price) price = parseFloat(jsonData.offers.price);
+                else if (jsonData.offers.lowPrice) price = parseFloat(jsonData.offers.lowPrice);
+              }
+              break;
             }
-            if (item.images && item.images.length > 0) {
-              image = `https://down-th.img.susercontent.com/file/${item.images[0]}`;
-            }
+          } catch {
+            // ignore JSON parse errors
           }
         }
-      } catch {
-        // Ignore API fallback error
+
+        // Fallback to OG meta tags if JSON-LD didn't have everything
+        if (!title) {
+          const ogTitle = parseOgMeta(html, "og:title");
+          if (ogTitle) {
+            title = ogTitle.replace(/\s*\|\s*Shopee\s*Thailand$/i, "").replace(/\s*\|\s*Shopee$/i, "").trim();
+          }
+        }
+        if (!image) {
+          const ogImage = parseOgMeta(html, "og:image");
+          if (ogImage && ogImage.includes("susercontent.com")) {
+            image = ogImage;
+          }
+        }
+        if (!description) {
+          const ogDesc = parseOgMeta(html, "og:description");
+          if (ogDesc && !ogDesc.includes("Buy and Sell on Mobile")) {
+            description = ogDesc;
+          }
+        }
       }
     }
 
-    // 4. Microlink API Fallback if item API didn't return title
+    // 4. Microlink API Fallback if product page scraping didn't return enough data
     if (!title || title.match(/^[\d\s]+$/)) {
       try {
         const controller = new AbortController();
@@ -242,23 +313,6 @@ export function ProductForm({
       }
     }
 
-    // Clean description if generic
-    if (description.includes("Buy and Sell on Mobile")) {
-      description = "";
-    }
-
-    // Extract price from title or description if not found yet
-    if (!price) {
-      const textToSearch = `${title} ${description}`;
-      const priceMatch = textToSearch.match(/[฿]\s*([\d,]+(?:\.\d+)?)/) ||
-                         textToSearch.match(/(?:ราคา|เพียง)\s*([\d,]+(?:\.\d+)?)\s*(?:บาท|\.-)/i) ||
-                         textToSearch.match(/([\d,]+)\s*บาท/i);
-      if (priceMatch?.[1]) {
-        const p = parseFloat(priceMatch[1].replace(/,/g, ""));
-        if (p > 0 && p < 1000000) price = p;
-      }
-    }
-
     return { title, image, description, price, resolvedUrl };
   };
 
@@ -271,7 +325,11 @@ export function ProductForm({
     const { title, image, description, price, resolvedUrl } = await fetchMetadataFromApis(cleanUrl);
 
     const displayTitle = title || "สินค้าจาก Shopee";
-    const slug = generateSlug(displayTitle) || `shopee-item-${Date.now()}`;
+    const rawSlug = generateSlug(displayTitle);
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const slug = rawSlug && rawSlug.length > 3
+      ? `${rawSlug.substring(0, 60).replace(/-+$/, "")}-${randomSuffix}`
+      : `shopee-item-${Date.now()}-${randomSuffix}`;
     const computedOrigPrice = price > 0 ? price + 5 : 0;
     const computedDiscount = computedOrigPrice > price ? Math.round(((computedOrigPrice - price) / computedOrigPrice) * 100) : 0;
 
