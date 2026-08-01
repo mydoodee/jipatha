@@ -108,12 +108,30 @@ export function ProductForm({
   };
 
   /**
-   * Helper to fetch via CORS proxy. Tries multiple proxies with fallback.
+   * Helper to fetch via CORS proxy or Microlink API.
    */
-  const fetchViaProxy = async (targetUrl: string, timeoutMs = 5000): Promise<{ contents: string; finalUrl: string } | null> => {
+  const fetchViaProxy = async (targetUrl: string, timeoutMs = 6000): Promise<{ contents: string; finalUrl: string } | null> => {
+    // Try microlink API first (has CORS headers, resolves redirects reliably without 403)
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, { signal: controller.signal });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+          const finalUrl = json.data.url || targetUrl;
+          return { contents: JSON.stringify(json.data), finalUrl };
+        }
+      }
+    } catch {
+      // Ignore microlink error
+    }
+
+    // Fallback proxies
     const proxies = [
       (u: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
-      (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     ];
 
     for (const makeUrl of proxies) {
@@ -124,22 +142,15 @@ export function ProductForm({
         clearTimeout(timer);
 
         if (!res.ok) continue;
-
         const contentType = res.headers.get("content-type") || "";
-
-        // allorigins returns JSON wrapper
         if (contentType.includes("application/json")) {
           const json = await res.json();
           const contents = json.contents || "";
           const finalUrl = json.status?.url || targetUrl;
           if (contents) return { contents, finalUrl };
-        } else {
-          // corsproxy returns raw content
-          const text = await res.text();
-          if (text) return { contents: text, finalUrl: targetUrl };
         }
       } catch {
-        // Try next proxy
+        // Try next
       }
     }
     return null;
@@ -165,15 +176,31 @@ export function ProductForm({
     let price = 0;
     let resolvedUrl = targetUrl;
 
-    // 1. Resolve short link via proxy to get final URL with item ID
+    // 1. Resolve short link via Microlink API
     if (isShopeeShortLink(targetUrl)) {
-      const proxyResult = await fetchViaProxy(targetUrl, 5000);
+      const proxyResult = await fetchViaProxy(targetUrl, 6000);
       if (proxyResult) {
         if (proxyResult.finalUrl && !proxyResult.finalUrl.includes("s.shopee.co.th")) {
           resolvedUrl = proxyResult.finalUrl;
         }
-        // Search HTML for product URLs
-        if (resolvedUrl.includes("s.shopee.co.th") && proxyResult.contents) {
+
+        // Check microlink JSON output if contents is JSON
+        try {
+          const data = JSON.parse(proxyResult.contents);
+          if (data.title && !data.title.toLowerCase().includes("shopee thailand") && data.title !== "Shopee") {
+            const rawTitle = data.title.replace(/\s*\|\s*Shopee.*$/i, "").trim();
+            if (!rawTitle.match(/^[\d\s\?\&\=\_\-]+$/) && !rawTitle.includes("__mobile__") && rawTitle.length > 3) {
+              title = rawTitle;
+            }
+          }
+          if (data.image?.url) {
+            image = data.image.url;
+          }
+          if (data.description && !data.description.includes("Buy and Sell on Mobile")) {
+            description = data.description.trim();
+          }
+        } catch {
+          // html contents fallback
           const html = proxyResult.contents;
           const urlPatterns = [
             /content=["']([^"']+)["']\s*property=["']og:url["']/i,
@@ -192,10 +219,14 @@ export function ProductForm({
       }
     }
 
-    // 2. Extract item ID from resolved URL or target URL
-    // i.shopId.itemId format first (most reliable)
+    // 2. Decode Title from resolved URL path if title is still missing
+    if (!title || title.match(/^[\d\s]+$/)) {
+      const urlTitle = extractTitleFromUrl(resolvedUrl);
+      if (urlTitle) title = urlTitle;
+    }
+
+    // 3. Extract item ID from resolved URL or target URL
     const iFormatMatch = resolvedUrl.match(/i\.(\d+)\.(\d+)/) || targetUrl.match(/i\.(\d+)\.(\d+)/);
-    // /product/shopId/itemId or /username/shopId/itemId
     const pathMatch = resolvedUrl.match(/\/(?:product\/)?(\d{5,15})\/(\d{5,15})/) ||
                       targetUrl.match(/\/(?:product\/)?(\d{5,15})\/(\d{5,15})/);
     const bestMatch = iFormatMatch || pathMatch;
@@ -203,97 +234,33 @@ export function ProductForm({
     const shopId = bestMatch?.[1] || null;
     const itemId = bestMatch?.[2] || bestMatch?.[1] || null;
 
-    // 3. Scrape product page via Twitterbot UA proxy (Shopee serves SSR to social bots)
-    if (shopId && itemId) {
+    // 4. Try fetching expanded product page metadata if missing
+    if (shopId && itemId && (!title || !image)) {
       const scrapeUrl = `https://shopee.co.th/product/${shopId}/${itemId}`;
-      const proxyResult = await fetchViaProxy(scrapeUrl, 8000);
+      const proxyResult = await fetchViaProxy(scrapeUrl, 6000);
 
       if (proxyResult?.contents) {
-        const html = proxyResult.contents;
-
-        // Parse JSON-LD Product data (most reliable source)
-        const jsonLdRegex = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
-        let jsonLdMatch;
-        while ((jsonLdMatch = jsonLdRegex.exec(html)) !== null) {
-          try {
-            const jsonData = JSON.parse(jsonLdMatch[1]);
-            if (jsonData["@type"] === "Product") {
-              if (jsonData.name) title = jsonData.name;
-              if (jsonData.description) description = jsonData.description;
-              if (jsonData.image) {
-                image = typeof jsonData.image === "string" ? jsonData.image : jsonData.image[0];
-              }
-              if (jsonData.offers) {
-                if (jsonData.offers.price) price = parseFloat(jsonData.offers.price);
-                else if (jsonData.offers.lowPrice) price = parseFloat(jsonData.offers.lowPrice);
-              }
-              break;
-            }
-          } catch {
-            // ignore JSON parse errors
+        try {
+          const data = JSON.parse(proxyResult.contents);
+          if (data.title && !title) title = data.title.replace(/\s*\|\s*Shopee.*$/i, "").trim();
+          if (data.image?.url && !image) image = data.image.url;
+          if (data.description && !description) description = data.description;
+        } catch {
+          const html = proxyResult.contents;
+          if (!title) {
+            const ogTitle = parseOgMeta(html, "og:title");
+            if (ogTitle) title = ogTitle.replace(/\s*\|\s*Shopee\s*Thailand$/i, "").trim();
           }
-        }
-
-        // Fallback to OG meta tags if JSON-LD didn't have everything
-        if (!title) {
-          const ogTitle = parseOgMeta(html, "og:title");
-          if (ogTitle) {
-            title = ogTitle.replace(/\s*\|\s*Shopee\s*Thailand$/i, "").replace(/\s*\|\s*Shopee$/i, "").trim();
+          if (!image) {
+            const ogImage = parseOgMeta(html, "og:image");
+            if (ogImage && ogImage.includes("susercontent.com")) image = ogImage;
           }
-        }
-        if (!image) {
-          const ogImage = parseOgMeta(html, "og:image");
-          if (ogImage && ogImage.includes("susercontent.com")) {
-            image = ogImage;
-          }
-        }
-        if (!description) {
-          const ogDesc = parseOgMeta(html, "og:description");
-          if (ogDesc && !ogDesc.includes("Buy and Sell on Mobile")) {
-            description = ogDesc;
+          if (!description) {
+            const ogDesc = parseOgMeta(html, "og:description");
+            if (ogDesc && !ogDesc.includes("Buy and Sell on Mobile")) description = ogDesc;
           }
         }
       }
-    }
-
-    // 4. Microlink API Fallback if product page scraping didn't return enough data
-    if (!title || title.match(/^[\d\s]+$/)) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 6000);
-        const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, { signal: controller.signal });
-        clearTimeout(timer);
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json.status === "success" && json.data) {
-            const d = json.data;
-            if (d.title && !d.title.toLowerCase().includes("shopee thailand") && d.title !== "Shopee") {
-              const rawTitle = d.title.replace(/\s*\|\s*Shopee.*$/i, "").trim();
-              if (!rawTitle.match(/^[\d\s\?\&\=\_\-]+$/) && !rawTitle.includes("__mobile__") && rawTitle.length > 3) {
-                title = rawTitle;
-              }
-            }
-            if (d.image?.url && !image) {
-              image = d.image.url;
-            }
-            if (d.description && !d.description.includes("Buy and Sell on Mobile") && !description) {
-              description = d.description.trim();
-            }
-            if (d.url && d.url.includes("shopee")) {
-              resolvedUrl = d.url;
-            }
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }
-
-    // 5. Decode Title from resolved URL path if title is still missing
-    if (!title || title.match(/^[\d\s]+$/)) {
-      const urlTitle = extractTitleFromUrl(resolvedUrl);
-      if (urlTitle) title = urlTitle;
     }
 
     // Clean description if generic
