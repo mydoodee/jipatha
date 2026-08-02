@@ -32,8 +32,9 @@ function initAdmin() {
     });
   }
 
-  // Fallback: running on Firebase/Google Cloud with default credentials
+  // Fallback: running with default credentials / project ID
   return initializeApp({
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
     storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   });
 }

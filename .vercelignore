@@ -1,0 +1,7 @@
+# Vercel Ignore File
+file_product/
+*.csv
+.next/
+node_modules/
+.firebase/
+out/

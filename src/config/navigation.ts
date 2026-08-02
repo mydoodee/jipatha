@@ -29,6 +29,7 @@ export const footerNavigation = {
 export const adminNavigation: NavItem[] = [
   { label: "แดชบอร์ด", href: "/admin/dashboard" },
   { label: "สินค้า", href: "/admin/products" },
+  { label: "Shopee Sync (ร้านตัวเอง)", href: "/admin/shopee-sync" },
   { label: "ระบบดึงออโต้", href: "/admin/auto-import" },
   { label: "หมวดหมู่", href: "/admin/categories" },
   { label: "บทความ", href: "/admin/posts" },
