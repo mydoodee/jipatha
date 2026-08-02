@@ -44,7 +44,7 @@ export function Header() {
           >
             <input
               type="text"
-              placeholder="ค้นหาสินค้า บทความ หมวดหมู่..."
+              placeholder="ค้นหากล้องวงจรปิด, Tapo, IMOU, Solar 4G..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-sm bg-gray-100 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition-all"

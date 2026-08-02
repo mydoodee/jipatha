@@ -5,6 +5,8 @@ import { constructMetadata } from "@/lib/seo/metadata";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { MobileNav } from "@/components/layout/MobileNav";
+import { CompareProvider } from "@/context/CompareContext";
+import { CompareDrawer } from "@/components/compare/CompareDrawer";
 
 const notoThai = Noto_Sans_Thai({
   subsets: ["thai", "latin"],
@@ -23,10 +25,13 @@ export default function RootLayout({
   return (
     <html lang="th" className={`${notoThai.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-gray-50 text-gray-900 pb-16 md:pb-0">
-        <Header />
-        <main className="flex-grow">{children}</main>
-        <Footer />
-        <MobileNav />
+        <CompareProvider>
+          <Header />
+          <main className="flex-grow">{children}</main>
+          <Footer />
+          <MobileNav />
+          <CompareDrawer />
+        </CompareProvider>
       </body>
     </html>
   );

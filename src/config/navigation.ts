@@ -7,17 +7,21 @@ export interface NavItem {
 
 export const mainNavigation: NavItem[] = [
   { label: "หน้าแรก", href: "/" },
-  { label: "สินค้าทั้งหมด", href: "/products" },
-  { label: "หมวดหมู่", href: "/categories" },
-  { label: "บทความ", href: "/blog" },
+  { label: "🤖 AI ช่วยเลือกกล้อง", href: "/ai-assistant" },
+  { label: "⚖️ เปรียบเทียบราคา", href: "/compare" },
+  { label: "📷 กล้องวงจรปิดทั้งหมด", href: "/products" },
+  { label: "🏷️ หมวดหมู่", href: "/categories" },
+  { label: "📖 บทความรีวิว", href: "/blog" },
 ];
 
 export const footerNavigation = {
   main: [
     { label: "หน้าแรก", href: "/" },
-    { label: "สินค้าทั้งหมด", href: "/products" },
+    { label: "AI ช่วยเลือกกล้อง", href: "/ai-assistant" },
+    { label: "เปรียบเทียบราคา", href: "/compare" },
+    { label: "กล้องวงจรปิดทั้งหมด", href: "/products" },
     { label: "หมวดหมู่", href: "/categories" },
-    { label: "บทความ", href: "/blog" },
+    { label: "บทความรีวิว", href: "/blog" },
   ],
   legal: [
     { label: "เกี่ยวกับเรา", href: "/about" },

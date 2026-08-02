@@ -11,17 +11,17 @@ interface AffiliateButtonProps {
 
 export function AffiliateButton({
   slug,
-  label = "ดูสินค้าใน Shopee",
+  label = "เช็คราคา",
   className = "",
   variant = "primary",
   size = "md",
 }: AffiliateButtonProps) {
   const baseStyles =
-    "inline-flex items-center justify-center gap-2 font-semibold rounded-lg transition-all duration-200 shadow-xs focus:outline-none focus:ring-2 focus:ring-offset-2 active:scale-[0.98]";
+    "inline-flex items-center justify-center gap-1.5 font-bold rounded-full transition-all duration-200 shadow-md focus:outline-none active:scale-[0.98]";
 
   const variantStyles = {
     primary:
-      "bg-orange-600 hover:bg-orange-700 text-white focus:ring-orange-500 hover:shadow-md",
+      "text-white shadow-rose-500/25 hover:shadow-lg hover:brightness-105",
     secondary:
       "bg-gray-900 hover:bg-black text-white focus:ring-gray-800",
     outline:
@@ -29,7 +29,7 @@ export function AffiliateButton({
   }[variant];
 
   const sizeStyles = {
-    sm: "px-3 py-1.5 text-xs",
+    sm: "px-4 py-2 text-xs",
     md: "px-5 py-2.5 text-sm",
     lg: "px-6 py-3.5 text-base w-full sm:w-auto",
   }[size];
@@ -39,11 +39,16 @@ export function AffiliateButton({
       href={`/go/${slug}`}
       target="_blank"
       rel="noopener noreferrer"
+      style={
+        variant === "primary"
+          ? { background: "linear-gradient(90deg, #ff5722 0%, #ff1744 100%)" }
+          : undefined
+      }
       className={`${baseStyles} ${variantStyles} ${sizeStyles} ${className}`}
     >
       <ShoppingCart className="w-4 h-4" />
       <span>{label}</span>
-      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+      <ExternalLink className="w-3.5 h-3.5 opacity-90 ml-0.5" />
     </Link>
   );
 }

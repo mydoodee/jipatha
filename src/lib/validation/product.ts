@@ -30,6 +30,17 @@ export const productSchema = z.object({
   featured: z.boolean(),
   seoTitle: z.string().optional(),
   seoDescription: z.string().optional(),
+
+  // CCTV Specs
+  resolution: z.string().optional(),
+  nightVision: z.string().optional(),
+  connectivity: z.string().optional(),
+  powerSupply: z.string().optional(),
+  environment: z.enum(["indoor", "outdoor", "both"]).optional(),
+  waterproof: z.boolean().optional(),
+  aiFeatures: z.array(z.string()).optional(),
+  viewAngle: z.string().optional(),
+  storage: z.string().optional(),
 });
 
 export type ProductFormData = z.infer<typeof productSchema>;

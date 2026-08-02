@@ -1,9 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import { ProductSerialized } from "@/types/product";
 import { ProductImage } from "./ProductImage";
 import { ProductPrice } from "./ProductPrice";
-import { Star } from "lucide-react";
+import { Star, Scale } from "lucide-react";
 import { AffiliateButton } from "@/components/affiliate/AffiliateButton";
+import { useCompare } from "@/context/CompareContext";
 
 interface ProductCardProps {
   product: ProductSerialized;
@@ -11,29 +14,36 @@ interface ProductCardProps {
 
 export function ProductCard({ product }: ProductCardProps) {
   const mainImage = product.images?.[0];
+  const { addToCompare, isInCompare } = useCompare();
+  const inCompare = isInCompare(product.id);
 
   return (
-    <div className="group bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-xl hover:shadow-gray-200/50 hover:-translate-y-1 transition-all duration-300 flex flex-col h-full">
-      {/* Image Link */}
-      <Link href={`/products/${product.slug}`} className="block relative overflow-hidden">
-        <ProductImage
-          src={mainImage}
-          alt={product.name}
-          aspectRatio="square"
-        />
-        {/* Hover overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+    <div className="group bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-xl hover:shadow-gray-200/50 hover:-translate-y-1 transition-all duration-300 flex flex-col h-full relative">
+      {/* Image Link & Compare Button Overlay */}
+      <div className="relative overflow-hidden block">
+        <Link href={`/products/${product.slug}`} className="block">
+          <ProductImage
+            src={mainImage}
+            alt={product.name}
+            aspectRatio="square"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        </Link>
+
+        {/* Featured Badge */}
         {product.featured && (
-          <span className="absolute top-2.5 left-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-lg shadow-orange-500/30">
+          <span className="absolute top-2.5 left-2.5 bg-gradient-to-r from-orange-500 to-rose-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-lg shadow-orange-500/30 pointer-events-none">
             ⚡ แนะนำ
           </span>
         )}
+
+        {/* Discount Badge */}
         {product.discountPercent !== undefined && product.discountPercent > 0 && (
-          <span className="absolute top-2.5 right-2.5 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-md">
+          <span className="absolute top-2.5 right-2.5 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-md pointer-events-none">
             -{product.discountPercent}%
           </span>
         )}
-      </Link>
+      </div>
 
       {/* Content */}
       <div className="p-3 sm:p-4 flex flex-col flex-grow">
@@ -70,21 +80,43 @@ export function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Price & Action */}
-        <div className="pt-2.5 border-t border-gray-50 flex flex-col xs:flex-row items-start xs:items-center justify-between gap-2 mt-auto">
+        {/* Price Row & Explicit "+ เทียบราคา" Button */}
+        <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2 mb-2">
           <ProductPrice
             price={product.price}
             originalPrice={product.originalPrice}
             discountPercent={product.discountPercent}
             size="sm"
           />
-          <AffiliateButton
-            slug={product.slug}
-            size="sm"
-            label="เช็คราคา"
-            className="w-full xs:w-auto text-[11px] py-1.5 px-3 rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 shadow-md shadow-orange-500/20 hover:shadow-lg hover:shadow-orange-500/30 transition-all duration-200"
-          />
+
+          {/* Prominent Compare Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              addToCompare(product);
+            }}
+            disabled={inCompare}
+            className={`text-[11px] font-extrabold px-3 py-1.5 rounded-full border transition-all flex items-center gap-1 flex-shrink-0 ${
+              inCompare
+                ? "bg-emerald-50 text-emerald-600 border-emerald-200 cursor-default"
+                : "bg-orange-50 hover:bg-orange-100 text-orange-600 border-orange-200 hover:border-orange-300 shadow-2xs hover:scale-105"
+            }`}
+            title="เปรียบเทียบสเปคกล้องรุ่นนี้"
+          >
+            <Scale className="w-3.5 h-3.5" />
+            <span>{inCompare ? "เทียบแล้ว" : "+ เทียบราคา"}</span>
+          </button>
         </div>
+
+        {/* Exact Original Shopee Button Style (#ff5722 to #ff1744, rounded-full capsule) */}
+        <AffiliateButton
+          slug={product.slug}
+          size="sm"
+          label="เช็คราคา"
+          className="w-full text-xs font-bold py-2 mt-auto"
+        />
       </div>
     </div>
   );
