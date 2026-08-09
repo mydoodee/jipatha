@@ -1,40 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { db, collection, getDocs, deleteDoc, doc } from "@/lib/firebase/firestore";
+import { db, collection, getDocs, writeBatch } from "@/lib/firebase/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest) {
-  try {
-    let deletedProducts = 0;
-    let deletedLinks = 0;
+async function deleteCollectionBatch(collectionName: string): Promise<number> {
+  let count = 0;
 
-    // Try deleting via adminDb first
-    try {
-      const prodSnap = await adminDb.collection("products").get();
-      for (const docSnap of prodSnap.docs) {
-        await docSnap.ref.delete();
-        deletedProducts++;
-      }
-      const linkSnap = await adminDb.collection("affiliate_links").get();
-      for (const docSnap of linkSnap.docs) {
-        await docSnap.ref.delete();
-        deletedLinks++;
-      }
-    } catch {
-      // Fallback to client DB
-      const prodSnap = await getDocs(collection(db, "products"));
-      for (const docSnap of prodSnap.docs) {
-        await deleteDoc(doc(db, "products", docSnap.id));
-        deletedProducts++;
-      }
-      const linkSnap = await getDocs(collection(db, "affiliate_links"));
-      for (const docSnap of linkSnap.docs) {
-        await deleteDoc(doc(db, "affiliate_links", docSnap.id));
-        deletedLinks++;
+  // Try adminDb first
+  try {
+    const snap = await adminDb.collection(collectionName).get();
+    count = snap.size;
+    if (count > 0) {
+      const batchSize = 400;
+      for (let i = 0; i < snap.docs.length; i += batchSize) {
+        const batch = adminDb.batch();
+        const chunk = snap.docs.slice(i, i + batchSize);
+        chunk.forEach((docSnap) => batch.delete(docSnap.ref));
+        await batch.commit();
       }
     }
+    return count;
+  } catch (adminErr) {
+    console.warn(`adminDb batch delete for ${collectionName} failed, falling back to client SDK writeBatch:`, adminErr);
+  }
+
+  // Fallback to client SDK writeBatch
+  try {
+    const snap = await getDocs(collection(db, collectionName));
+    count = snap.size;
+    if (count > 0) {
+      const batchSize = 400;
+      for (let i = 0; i < snap.docs.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = snap.docs.slice(i, i + batchSize);
+        chunk.forEach((docSnap) => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
+    }
+    return count;
+  } catch (clientErr) {
+    console.error(`Client writeBatch error for ${collectionName}:`, clientErr);
+    throw clientErr;
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const deletedProducts = await deleteCollectionBatch("products");
+    const deletedLinks = await deleteCollectionBatch("affiliate_links");
 
     try {
       revalidatePath("/");
