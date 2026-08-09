@@ -23,16 +23,8 @@ export async function POST(req: NextRequest) {
       allProducts = [];
     }
 
-    if (!allProducts || allProducts.length === 0) {
-      allProducts = sampleCctvProducts;
-    } else {
-      // Merge with sample products to ensure rich CCTV pool
-      const existingIds = new Set(allProducts.map((p) => p.id));
-      for (const sample of sampleCctvProducts) {
-        if (!existingIds.has(sample.id)) {
-          allProducts.push(sample);
-        }
-      }
+    if (!allProducts) {
+      allProducts = [];
     }
 
     const textLower = prompt.toLowerCase();

@@ -9,8 +9,8 @@ import { AffiliateButton } from "@/components/affiliate/AffiliateButton";
 export default function ComparePage() {
   const { compareList, removeFromCompare, clearCompare, addToCompare } = useCompare();
 
-  // If user hasn't selected items, show sample items for easy selection
-  const productsToDisplay = compareList.length > 0 ? compareList : sampleCctvProducts.slice(0, 3);
+  // If user hasn't selected items, show compareList or empty
+  const productsToDisplay = compareList;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
