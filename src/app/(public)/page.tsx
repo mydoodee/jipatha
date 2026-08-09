@@ -110,6 +110,7 @@ export default async function HomePage() {
 
   return (
     <>
+      {/* VERCEL_BUILD_TEST_2026_AUG_09 */}
       <SeoJsonLd data={generateWebSiteSchema()} />
       <SeoJsonLd data={generateOrganizationSchema()} />
 
