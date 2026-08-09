@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getProducts } from "@/lib/firebase/services/products";
 import { getPosts } from "@/lib/firebase/services/posts";
-import { sampleCctvProducts } from "@/lib/data/cctvCatalog";
 import { ProductGrid } from "@/components/product/ProductGrid";
 import { BlogCard } from "@/components/blog/BlogCard";
 import { AffiliateDisclosure } from "@/components/affiliate/AffiliateDisclosure";
