@@ -19,7 +19,8 @@ import {
 import { siteConfig } from "@/config/site";
 import { ProductSerialized } from "@/types/product";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /* ─── CCTV Brands List ─── */
 const cctvBrands = [
@@ -104,15 +105,7 @@ export default async function HomePage() {
     latestProducts = dbLatest;
     latestPosts = dbPosts;
   } catch (e) {
-    console.error("Firebase fetch error, using sample CCTV catalog fallback:", e);
-  }
-
-  // Fallback to rich CCTV sample catalog if DB products empty
-  if (featuredProducts.length === 0) {
-    featuredProducts = sampleCctvProducts.filter((p) => p.featured).slice(0, 4);
-  }
-  if (latestProducts.length === 0) {
-    latestProducts = sampleCctvProducts;
+    console.error("Firebase fetch error:", e);
   }
 
   return (

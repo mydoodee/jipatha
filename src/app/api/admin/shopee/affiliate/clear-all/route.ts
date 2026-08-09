@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { db, collection, getDocs, deleteDoc, doc } from "@/lib/firebase/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 
@@ -33,6 +34,14 @@ export async function POST(req: NextRequest) {
         await deleteDoc(doc(db, "affiliate_links", docSnap.id));
         deletedLinks++;
       }
+    }
+
+    try {
+      revalidatePath("/");
+      revalidatePath("/products");
+      revalidatePath("/categories");
+    } catch (revErr) {
+      console.warn("Revalidate error:", revErr);
     }
 
     return NextResponse.json({

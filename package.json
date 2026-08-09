@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "deploy": "npx firebase deploy",
-    "deploy:hosting": "npx firebase deploy --only hosting"
+    "deploy": "git add . && git commit -m \"deploy: update site for vercel\" && git push origin main",
+    "deploy:vercel": "npx vercel --prod"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.5.7",

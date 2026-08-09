@@ -1,24 +1,25 @@
 @echo off
 chcp 65001 >nul
 echo ========================================================
-echo   Jipatha - Quick Update (Deploy Only)
-echo   Skip build if no code changes
+echo   Jipatha - Quick Vercel Deploy (Git Push)
 echo ========================================================
 echo.
 
-echo Deploying to Firebase Hosting...
+echo Pushing updates to GitHub for Vercel deployment...
 echo.
-call npx firebase deploy --only hosting
+git add .
+git commit -m "quick update for vercel: %date% %time%"
+git push origin main
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [ERROR] Deploy failed!
+    echo [ERROR] Git push failed!
     pause
     exit /b %ERRORLEVEL%
 )
 
 echo.
 echo ========================================================
-echo   SUCCESS! Deploy complete.
-echo   Website: https://jipatha-798.web.app
+echo   SUCCESS! Pushed to GitHub.
+echo   Vercel deployment triggered automatically.
 echo ========================================================
 pause
